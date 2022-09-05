@@ -1,4 +1,4 @@
-# logdeep
+# DP-FSL
 
 ## Introduction
 
@@ -22,7 +22,6 @@ LogDeep is an open source deeplearning-based log analysis toolkit for automated 
 | :--- | :--- |
 |DeepLog| [**CCS'17**] [DeepLog: Anomaly Detection and Diagnosis from System Logs through Deep Learning](https://www.cs.utah.edu/~lifeifei/papers/deeplog.pdf)|
 |LogAnomaly| [**IJCAI'19**] [LogAnomaly: UnsupervisedDetectionof SequentialandQuantitativeAnomaliesinUnstructuredLogs](https://www.ijcai.org/Proceedings/2019/658)|
-|RobustLog| [**FSE'19**] [RobustLog-BasedAnomalyDetectiononUnstableLogData](https://dl.acm.org/doi/10.1145/3338906.3338931)
 
 ## Requirement
 
