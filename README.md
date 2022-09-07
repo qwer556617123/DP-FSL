@@ -31,6 +31,9 @@ DP-FSL is an anomaly detection method that can integrate data information from s
 |DeepLog| [**CCS'17**] [DeepLog: Anomaly Detection and Diagnosis from System Logs through Deep Learning](https://www.cs.utah.edu/~lifeifei/papers/deeplog.pdf)|
 |LogAnomaly| [**IJCAI'19**] [LogAnomaly: UnsupervisedDetectionof SequentialandQuantitativeAnomaliesinUnstructuredLogs](https://www.ijcai.org/Proceedings/2019/658)|
 
+*Note: The code of local models is referenced from [donglee-afar/logdeep](https://github.com/donglee-afar/logdeep).*
+
+
 ## Federated algorithms
 
 | Algorithm | Paper reference |
@@ -38,9 +41,9 @@ DP-FSL is an anomaly detection method that can integrate data information from s
 |Fedavg| [**PMLR'20**] [Communication-Efficient Learning of Deep Networks from Decentralized Data](https://proceedings.mlr.press/v54/mcmahan17a/mcmahan17a.pdf)|
 |FedAdam| [**ICLR'21**] [Adaptive Federated Optimization](http://www.sanjivk.com/adaptive_federated_optimization_ICLR2021.pdf)|
 
-<!--
-## Requirement
 
+## Requirement
+<!--
 - python>=3.6
 - pytorch >= 1.1.0
 
