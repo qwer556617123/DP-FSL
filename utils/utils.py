@@ -279,12 +279,12 @@ def fetch_log_datasets(args, total_client_num, client_num):
     return train_loader, valid_loader, test_loader
 
 def create_model(args):
-    if args.model.lower() == 'deeplog':
+    if args.mode.lower() == 'deeplog':
         model = deeplog(input_size = args.input_size, 
                         hidden_size = args.hidden_size, 
                         num_layers = args.num_layers, 
                         num_keys = args.num_keys)
-    elif args.model.lower() == 'loganomaly':
+    elif args.mode.lower() == 'loganomaly':
         model = loganomaly(input_size = args.input_size, 
                         hidden_size = args.hidden_size, 
                         num_layers = args.num_layers, 

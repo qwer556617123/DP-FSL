@@ -2,6 +2,7 @@ import gc
 import os
 import sys
 import time
+import copy
 
 import pandas as pd
 import torch
@@ -13,7 +14,7 @@ class Client():
     def __init__(self, args, model, dataset, idx):
         # self.args = args
         self.device = args.device
-        self.model = model.deepcopy(model).to(self.device)
+        self.model = copy.deepcopy(model).to(self.device)
         self.dataset = dataset
         self.idx = idx
         self.batch_size = args.batch_size
