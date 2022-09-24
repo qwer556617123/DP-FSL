@@ -1,13 +1,17 @@
 import argparse
 
 from utils.utils import create_model
+
 from FLAlgorithms.servers.server import Server
-from FLAlgorithms.clients.client import Client
+from FLAlgorithms.servers.SL_server import SL_Server
 
 
 def init_server(args):
     model = create_model(args)
-    server = Server(args, model)
+    if args.split:
+        server = SL_Server(args, model)
+    else:
+        server = Server(args, model)
     return server
 
 def main(args):
@@ -20,13 +24,14 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # Server
-    parser.add_argument("--train", type=bool, default=False)
-    parser.add_argument("--mode", type=str, default='fedavg')
+    parser.add_argument("--train", type=bool, default=True)
+    parser.add_argument("--mode", type=str, default='fedadam')
+    parser.add_argument("--split", type=bool, default=True)
     parser.add_argument("--beta_1", type=float, default=0.9)
     parser.add_argument("--beta_2", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=1e-2)
     parser.add_argument("--server_lr", type=float, default=1e-1)
-    parser.add_argument("--client_num", type=int, default=5)
+    parser.add_argument("--client_num", type=int, default=2)
     parser.add_argument("--global_epoch", type=int, default=2)
     parser.add_argument("--data_dir", type=str, default='./data/')
     parser.add_argument("--device", type=str, default='cuda')
@@ -39,7 +44,7 @@ if __name__ == "__main__":
     parser.add_argument("--quantitatives", type=bool, default=False) # True when LogAnomaly
     parser.add_argument("--semantics", type=bool, default=False)
     # Model
-    parser.add_argument("--model_name", type=str, default='deeplog')
+    parser.add_argument("--model_name", type=str, default='loganomaly')
     parser.add_argument("--input_size", type=int, default=1)
     parser.add_argument("--hidden_size", type=int, default=64)
     parser.add_argument("--num_layers", type=int, default=2)
@@ -55,4 +60,8 @@ if __name__ == "__main__":
     parser.add_argument("--model_path", type=str, default="./models/deeplog/deeplog_fedavg.pt") # replace
 
     args = parser.parse_args()
-    main(args)
+
+    model = create_model(args)
+    print(model)
+
+    # main(args)

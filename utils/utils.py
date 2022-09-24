@@ -14,7 +14,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
-from FLAlgorithms.models.anomaly_detection_models import deeplog, loganomaly
+from FLAlgorithms.models.anomaly_detection_models import *
 
 # from logdeep.dataset.log import log_dataset
 # from logdeep.dataset.sample import sliding_window, session_window
@@ -101,9 +101,11 @@ def sliding_window(data_dir, total_client_num, client_num, datatype, window_size
         data_dir += 'hdfs/hdfs_test_normal'
     
     count = len(open(data_dir,'r').readlines())
+    start_idx = int(count/total_client_num)*client_num
+    end_idx = int(count/total_client_num)*(client_num + 1)
     
     with open(data_dir, 'r') as f:
-        for line in f.readlines()[int(count/total_client_num)*client_num : int(count/total_client_num)*(client_num + 1)]: # 5 clients
+        for line in f.readlines()[start_idx : end_idx]:
             num_sessions += 1
             line = tuple(map(lambda n: n - 1, map(int, line.strip().split())))
 
@@ -279,16 +281,39 @@ def fetch_log_datasets(args, total_client_num, client_num):
     return train_loader, valid_loader, test_loader
 
 def create_model(args):
-    if args.model_name.lower() == 'deeplog':
-        model = deeplog(input_size = args.input_size, 
-                        hidden_size = args.hidden_size, 
-                        num_layers = args.num_layers, 
-                        num_keys = args.num_classes)
-    elif args.model_name.lower() == 'loganomaly':
-        model = loganomaly(input_size = args.input_size, 
-                        hidden_size = args.hidden_size, 
-                        num_layers = args.num_layers, 
-                        num_keys = args.num_classes)
+    if args.split:
+        if args.model_name.lower() == 'deeplog':
+            model_1 = deeplog_1st(input_size = args.input_size, 
+                            hidden_size = args.hidden_size, 
+                            num_layers = args.num_layers, 
+                            num_keys = args.num_classes)
+            model_2 = deeplog_2nd(input_size = args.input_size, 
+                            hidden_size = args.hidden_size, 
+                            num_layers = args.num_layers, 
+                            num_keys = args.num_classes)
+        elif args.model_name.lower() == 'loganomaly':
+            model_1 = loganomaly_1st(input_size = args.input_size, 
+                            hidden_size = args.hidden_size, 
+                            num_layers = args.num_layers, 
+                            num_keys = args.num_classes)
+            model_2 = loganomaly_2nd(input_size = args.input_size, 
+                            hidden_size = args.hidden_size, 
+                            num_layers = args.num_layers, 
+                            num_keys = args.num_classes)
+        else:
+            raise NotImplementedError
+        return model_1, model_2
     else:
-        raise NotImplementedError
-    return model
+        if args.model_name.lower() == 'deeplog':
+            model = deeplog(input_size = args.input_size, 
+                            hidden_size = args.hidden_size, 
+                            num_layers = args.num_layers, 
+                            num_keys = args.num_classes)
+        elif args.model_name.lower() == 'loganomaly':
+            model = loganomaly(input_size = args.input_size, 
+                            hidden_size = args.hidden_size, 
+                            num_layers = args.num_layers, 
+                            num_keys = args.num_classes)
+        else:
+            raise NotImplementedError
+        return model

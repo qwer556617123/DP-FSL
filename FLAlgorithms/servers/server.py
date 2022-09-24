@@ -67,7 +67,7 @@ class Server():
                     v[key] = torch.mul(v[key], self.beta_2) + torch.mul(param.grad**2, 1-self.beta_2)
                     param.data = param.data + torch.mul(torch.div(param.grad, torch.add(torch.sqrt(v[key]), self.tau)), self.server_lr)
                     
-                    for client_idx in range(len(self.client_num)):
+                    for client_idx in range(self.client_num):
                         self.clients[client_idx].model.state_dict()[key].data.copy_(self.global_model.state_dict()[key])
         else:
             with torch.no_grad():
