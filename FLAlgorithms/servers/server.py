@@ -1,6 +1,7 @@
 import sys
 import torch
 import copy
+import os
 
 from utils.utils import fetch_log_datasets
 from FLAlgorithms.clients.client import Client
@@ -17,6 +18,7 @@ class Server():
         self.beta_2 = args.beta_2
         self.tau = args.tau
         self.server_lr = args.server_lr
+        self.model_name = args.model_name # deeplog or loganomaly
 
         self.datasets = {i:{'train_loader': None, 'valid_loader': None, 'test_loader': None} for i in range(self.client_num)}
 
@@ -41,17 +43,18 @@ class Server():
             client = Client(args, model, self.datasets[i], i)
             self.clients.append(client)
         
-        print("Finished creating servers")
+        print("Finished creating server")
 
     def train(self):
         for glob_iter in range(self.global_epoch):
-            print("\n\n-------------Global Round: ",glob_iter, " -------------\n\n")
+            print("\n\n-------------Global Round: ",glob_iter+1, " -------------\n\n")
             for client in self.clients: 
                 client.start_train()
             self.aggregate(self.v, self.grad)
+        self.save_model()
     
     def aggregate(self, v, grad):
-        print(self.clients)
+        # print(self.clients)
         if self.mode == 'fedadam':
             with torch.no_grad():
                 for key, param in self.global_model.named_parameters():                
@@ -81,3 +84,15 @@ class Server():
                         for client_idx in range(self.client_num):
                             self.clients[client_idx].model.state_dict()[key].data.copy_(self.global_model.state_dict()[key])
         # return global_model, models, v, grad
+    
+    def save_model(self):
+        print("saving model")
+        model_path = os.path.join("./models/", self.model_name)
+        if not os.path.exists(model_path):
+            os.makedirs(model_path)
+        torch.save(self.global_model.state_dict(), os.path.join(model_path, self.model_name + '_' + self.mode + ".pt"))
+
+    def test(self):
+        print("\n\n------------- Test -------------\n\n")
+        for client in self.clients: 
+            client.test()
