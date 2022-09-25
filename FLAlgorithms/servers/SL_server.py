@@ -2,9 +2,10 @@ import sys
 import torch
 import copy
 import os
+import datetime
 
-from utils.utils import fetch_log_datasets
-from FLAlgorithms.clients.client import Client
+from utils.utils import fetch_log_datasets, clip_generator, add_noise_generator
+from FLAlgorithms.clients.SL_client import SL_Client
 
 class SL_Server():
     def __init__(self, args, models):
@@ -24,6 +25,10 @@ class SL_Server():
 
         self.client_weights = [1/self.client_num for i in range(self.client_num)]
         
+        # Differential Privacy
+        self.dp = args.dp
+        self.group = {'noise_scale':args.noise_scale, 'norm_bound':args.norm_bound}
+
         self.v_1 = {}
         self.grad_1 = {}
         self.v_2 = {}
@@ -36,6 +41,9 @@ class SL_Server():
             self.v_2[key] = torch.add(torch.zeros_like(self.server_model_2.state_dict()[key],dtype=torch.float32),self.tau**2)
             self.grad_2[key] = torch.zeros_like(self.server_model_2.state_dict()[key],dtype=torch.float32)
 
+        print("SL Server")
+        print("Model: {}".format(self.model_name))
+        print("Mode: {}".format(self.mode))
         print("Total clients: {}".format(self.client_num))
 
         for i in range(self.client_num):
@@ -46,7 +54,7 @@ class SL_Server():
             self.datasets[i]['test_loader'] = test_loader
 
         for i in range(self.client_num):
-            client = Client(args, models, self.datasets[i], i)
+            client = SL_Client(args, models, self.datasets[i], i)
             self.clients.append(client)
         
         print("Finished creating server")
@@ -109,14 +117,14 @@ class SL_Server():
         if self.mode.lower() == 'fedadam':
             with torch.no_grad():
                 for key, param in self.server_model_1.named_parameters():
-                    # clip = clip_generator(norm_bound=group['norm_bound'])
-                    # add_noise = add_noise_generator(noise_scale=group['noise_scale'] * group['norm_bound'])
-                    
                     temp = torch.zeros_like(self.server_model_1.state_dict()[key])
                     for client_idx in range(self.client_num):
                         temp += self.client_weights[client_idx] * self.clients[client_idx].model_1.state_dict()[key]                         
                     param.grad = temp - param.data   
-                    # param.grad = add_noise(clip(param.grad))
+                    if self.dp:
+                        clip = clip_generator(norm_bound=self.group['norm_bound'])
+                        add_noise = add_noise_generator(noise_scale=self.group['noise_scale'] * self.group['norm_bound']) 
+                        param.grad = add_noise(clip(param.grad))
                     param.grad = torch.mul(self.grad_1[key], self.beta_1) + torch.mul(param.grad, 1-self.beta_1) 
                     self.grad_1[key] = param.grad    
                     
@@ -126,14 +134,14 @@ class SL_Server():
                     for client_idx in range(self.client_num):
                         self.clients[client_idx].model_1.state_dict()[key].data.copy_(self.server_model_1.state_dict()[key])
                 for key, param in self.server_model_2.named_parameters():       
-                    # clip = clip_generator(norm_bound=group['norm_bound'])
-                    # add_noise = add_noise_generator(noise_scale=group['noise_scale'] * group['norm_bound'])
-                    
                     temp = torch.zeros_like(self.server_model_2.state_dict()[key])
                     for client_idx in range(self.client_num):
                         temp += self.client_weights[client_idx] * self.clients[client_idx].model_2.state_dict()[key]                           
                     param.grad = temp - param.data   
-                    # param.grad = add_noise(clip(param.grad))
+                    if self.dp:
+                        clip = clip_generator(norm_bound=self.group['norm_bound'])
+                        add_noise = add_noise_generator(noise_scale=self.group['noise_scale'] * self.group['norm_bound']) 
+                        param.grad = add_noise(clip(param.grad))
                     param.grad = torch.mul(self.grad_2[key], self.beta_1) + torch.mul(param.grad, 1-self.beta_1) 
                     self.grad_2[key] = param.grad                
                     self.v_2[key] = torch.mul(self.v_2[key], self.beta_2) + torch.mul(param.grad**2, 1-self.beta_2)
@@ -152,7 +160,11 @@ class SL_Server():
                     else:
                         temp = torch.zeros_like(self.server_model_1.state_dict()[key]).to(self.device)
                         for client_idx in range(self.client_num):
-                            temp += self.client_weights[client_idx] * self.clients[client_idx].model_1.state_dict()[key]                        
+                            temp += self.client_weights[client_idx] * self.clients[client_idx].model_1.state_dict()[key]
+                        if self.dp:
+                            clip = clip_generator(norm_bound=self.group['norm_bound'])
+                            add_noise = add_noise_generator(noise_scale=self.group['noise_scale'] * self.group['norm_bound'])
+                            temp = add_noise(clip(temp))  
                         self.server_model_1.state_dict()[key].data.copy_(temp)#weight傳給server
                         for client_idx in range(self.client_num):
                             self.clients[client_idx].model_1.state_dict()[key].data.copy_(self.server_model_1.state_dict()[key])
@@ -165,18 +177,30 @@ class SL_Server():
                         temp = torch.zeros_like(self.server_model_2.state_dict()[key]).to(self.device)
                         for client_idx in range(self.client_num):
                             temp += self.client_weights[client_idx] * self.clients[client_idx].model_2.state_dict()[key]                        
+                        if self.dp:
+                            clip = clip_generator(norm_bound=self.group['norm_bound'])
+                            add_noise = add_noise_generator(noise_scale=self.group['noise_scale'] * self.group['norm_bound'])
+                            temp = add_noise(clip(temp))  
                         self.server_model_2.state_dict()[key].data.copy_(temp)#weight傳給server
                         for client_idx in range(self.client_num):
                             self.clients[client_idx].model_2.state_dict()[key].data.copy_(self.server_model_2.state_dict()[key])
     
     def save_model(self):
         print("saving model")
-        model_path = os.path.join("./models/", self.model_name)
+        date = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+        model_path = os.path.join("./models/", self.model_name + "/split/" + date)
         if not os.path.exists(model_path):
             os.makedirs(model_path)
-        torch.save(self.global_model.state_dict(), os.path.join(model_path, self.model_name + '_' + self.mode + ".pt"))
+        torch.save(self.server_model_1.state_dict(), os.path.join(model_path, 
+                                                                str(self.client_num) + '_Client_' + self.model_name + '_SL' + '_1_' + self.mode + '_dp' + ".pt" if self.dp 
+                                                                else str(self.client_num) + '_Client_' + self.model_name + '_SL' + '_1_' + self.mode + ".pt"))
+        torch.save(self.server_model_2.state_dict(), os.path.join(model_path, 
+                                                                str(self.client_num) + '_Client_' + self.model_name + '_SL' + '_2_' + self.mode + '_dp' + ".pt" if self.dp 
+                                                                else str(self.client_num) + '_Client_' + self.model_name + '_SL' + '_2_' + self.mode + ".pt"))
+        print("Model saved to path: {}".format(model_path))
 
     def test(self):
         print("\n\n------------- Test -------------\n\n")
-        for client in self.clients: 
+        for idx, client in enumerate(self.clients): 
+            print('Client ', idx) 
             client.test()

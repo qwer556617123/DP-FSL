@@ -31,7 +31,7 @@ class Client():
         self.test_abnormal_length = dataset['test_loader']['abnormal']['abnormal_len']
 
         # predict
-        self.model_path = args.model_path
+        self.model_dir = args.model_dir
         self.window_size = args.window_size
         self.input_size = args.input_size
         self.num_classes = args.num_classes 
@@ -107,7 +107,7 @@ class Client():
         #                          suffix="bestloss")
 
     def start_train(self):
-        print('| Model {} |'.format(self.idx+1))
+        print('| Client {} |'.format(self.idx+1))
         for epoch in range(self.start_epoch, self.local_epoch):
             if epoch == 0:
                 self.optimizer.param_groups[0]['lr'] /= 32
@@ -123,7 +123,9 @@ class Client():
             # self.save_log()
 
     def load_model(self):
-        self.model.load_state_dict(torch.load(self.model_path))
+        root = self.model_dir
+        model_path = os.listdir(root)
+        self.model.load_state_dict(torch.load(os.path.join(root, model_path[0])))
     
     def test(self):
         self.load_model()

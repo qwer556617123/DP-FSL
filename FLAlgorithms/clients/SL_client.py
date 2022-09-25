@@ -12,10 +12,10 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 class SL_Client():
-    def __init__(self, args, model, dataset, idx):
+    def __init__(self, args, models, dataset, idx):
         # self.args = args
         self.device = args.device
-        self.model = copy.deepcopy(model).to(self.device)
+        self.model_1, self.model_2 = copy.deepcopy(models[0]).to(self.device), copy.deepcopy(models[1]).to(self.device)
         self.dataset = dataset
         self.idx = idx
         self.batch_size = args.batch_size
@@ -31,16 +31,26 @@ class SL_Client():
         self.test_abnormal_length = dataset['test_loader']['abnormal']['abnormal_len']
 
         # predict
-        self.model_path = args.model_path
+        self.model_dir = args.model_dir
         self.window_size = args.window_size
         self.input_size = args.input_size
         self.num_classes = args.num_classes 
         self.num_candidates = args.num_candidates
 
         if args.optimizer.lower() == 'sgd':
-            self.optimizer = torch.optim.SGD(self.model.parameters(), lr = args.lr, momentum = 0.9)
+            self.optimizer_1 = torch.optim.SGD(self.model_1.parameters(), 
+                                            lr = args.lr, 
+                                            momentum = 0.9)
+            self.optimizer_2 = torch.optim.SGD(self.model_2.parameters(), 
+                                            lr = args.lr, 
+                                            momentum = 0.9)
         elif args.optimizer.lower() == 'adam':
-            self.optimizer = torch.optim.Adam(self.model.parameters(), lr = args.lr, betas = (0.9, 0.99))
+            self.optimizer_1 = torch.optim.Adam(self.model_1.parameters(), 
+                                            lr = args.lr, 
+                                            betas = (0.9, 0.99))
+            self.optimizer_2 = torch.optim.Adam(self.model_2.parameters(), 
+                                            lr = args.lr, 
+                                            betas = (0.9, 0.99))
         else:
             raise NotImplementedError
         
@@ -51,34 +61,53 @@ class SL_Client():
 
     def train(self, epoch):
         start = time.strftime("%H:%M:%S")
-        lr = self.optimizer.state_dict()['param_groups'][0]['lr']
+        lr = self.optimizer_1.state_dict()['param_groups'][0]['lr']
         print("Starting epoch: %d | phase: train | ⏰: %s | Learning rate: %f" %
             (epoch+1, start, lr))
         # self.log['train']['lr'].append(lr)
         # self.log['train']['time'].append(start)
-        self.model.train()
-        self.optimizer.zero_grad()
+        self.model_1.train()
+        self.model_2.train()
+
+        self.optimizer_1.zero_grad()
         criterion = nn.CrossEntropyLoss()
         tbar = tqdm(self.train_loader, desc="\r")
-        num_batch = len(self.train_loader)
+        # num_batch = len(self.train_loader)
         total_losses = 0
         for i, (log, label) in enumerate(tbar):
             features = []
             for value in log.values():
                 features.append(value.clone().detach().to(self.device))
-            output = self.model(features=features, device=self.device)
+            
+            features_1 = []
+            features_2 = []
+            for item in features:
+                features_1.append(item[:, :int(self.window_size/2), :])  # 從特徵切 不是從batch順序切
+                features_2.append(item[:, int(self.window_size/2):, :])
+
+            self.optimizer_2.zero_grad()  
+
+            clientout, clientpreh, clientprec = self.model_1(features = features_1, device=self.device)
+            output = self.model_2(features = features_2, hPrevious = clientpreh, cPrevious = clientprec, device=self.device)
+
+            
             loss = criterion(output, label.to(self.device))
             total_losses += float(loss)
-            # loss /= self.accumulation_step
-            loss.backward()
+            loss /= self.accumulation_step
+            loss.backward(retain_graph = True)
+
             if (i + 1) % self.accumulation_step == 0:
-                self.optimizer.step()
-                self.optimizer.zero_grad()
+                self.optimizer_2.step()
+                self.optimizer_1.step()
+                self.optimizer_2.zero_grad()
+                self.optimizer_1.zero_grad()
             tbar.set_description("Train loss: %.5f" % (total_losses / (i + 1)))
 
 
     def valid(self, epoch):
-        self.model.eval()
+        self.model_1.eval()
+        self.model_2.eval()
+
         # self.log['valid']['epoch'].append(epoch)
         # lr = self.optimizer.state_dict()['param_groups'][0]['lr']
         # self.log['valid']['lr'].append(lr)
@@ -89,12 +118,22 @@ class SL_Client():
         criterion = nn.CrossEntropyLoss()
         tbar = tqdm(self.valid_loader, desc="\r")
         num_batch = len(self.valid_loader)
+
         for i, (log, label) in enumerate(tbar):
             with torch.no_grad():
                 features = []
                 for value in log.values():
                     features.append(value.clone().detach().to(self.device))
-                output = self.model(features=features, device=self.device)
+                
+                features_1 = []
+                features_2 = []
+                for item in features:
+                    features_1.append(item[:, :int(self.window_size/2), :])  # 從特徵切 不是從batch順序切
+                    features_2.append(item[:, int(self.window_size/2):, :])
+
+                clientout, clientpreh, clientprec = self.model_1(features = features_1, device = self.device)
+                output = self.model_2(features = features_2, hPrevious = clientpreh, cPrevious = clientprec, device=self.device)
+                
                 loss = criterion(output, label.to(self.device))
                 total_losses += float(loss)
         print("Validation loss:", total_losses / num_batch)
@@ -107,12 +146,14 @@ class SL_Client():
         #                          suffix="bestloss")
 
     def start_train(self):
-        print('| Model {} |'.format(self.idx+1))
+        print('| Client {} |'.format(self.idx+1))
         for epoch in range(self.start_epoch, self.local_epoch):
             if epoch == 0:
-                self.optimizer.param_groups[0]['lr'] /= 32
+                self.optimizer_1.param_groups[0]['lr'] /= 32  
+                self.optimizer_2.param_groups[0]['lr'] /= 32
             if epoch in [1, 2, 3, 4, 5]:
-                self.optimizer.param_groups[0]['lr'] *= 2
+                self.optimizer_1.param_groups[0]['lr'] *= 2
+                self.optimizer_2.param_groups[0]['lr'] *= 2
             self.train(epoch)
             if epoch >= self.local_epoch // 2 and epoch % 2 == 0:
                 self.valid(epoch)
@@ -123,13 +164,19 @@ class SL_Client():
             # self.save_log()
 
     def load_model(self):
-        self.model.load_state_dict(torch.load(self.model_path))
+        root = self.model_dir
+        model_path = os.listdir(root)
+
+        self.model_1.load_state_dict(torch.load(os.path.join(root, model_path[0])))
+        self.model_2.load_state_dict(torch.load(os.path.join(root, model_path[1])))
     
     def test(self):
         self.load_model()
         # print('test model')
-        self.model.to(self.device)
-        self.model.eval()
+        self.model_1.to(self.device)
+        self.model_2.to(self.device)
+        self.model_1.eval()
+        self.model_2.eval()
         TP = 0
         FP = 0
         # Test the model
@@ -149,9 +196,12 @@ class SL_Client():
                     seq1 = torch.tensor(seq1, dtype=torch.float).view(
                         -1, self.num_classes, self.input_size).to(self.device)
                     label = torch.tensor(label).view(-1).to(self.device)
-                    output = self.model(features=[seq0, seq1], device=self.device)
-                    predicted = torch.argsort(output,
-                                              1)[0][-self.num_candidates:]
+
+                    clientout, clientpreh, clientprec = self.model_1(features = [seq0[:,:int(self.window_size/2),:], seq1[:,:int(self.window_size/2),:]], device = self.device)
+                    output = self.model_2(features=[seq0[:,int(self.window_size/2):,:], seq1[:,int(self.window_size/2):,:]]
+                                     , hPrevious = clientpreh, cPrevious = clientprec, device=self.device)
+
+                    predicted = torch.argsort(output, 1)[0][-self.num_candidates:]
                     if label not in predicted:
                         FP += self.test_normal_loader[line]
                         break
@@ -170,9 +220,12 @@ class SL_Client():
                     seq1 = torch.tensor(seq1, dtype=torch.float).view(
                         -1, self.num_classes, self.input_size).to(self.device)
                     label = torch.tensor(label).view(-1).to(self.device)
-                    output = self.model(features=[seq0, seq1], device=self.device)
-                    predicted = torch.argsort(output,
-                                              1)[0][-self.num_candidates:]
+
+                    clientout, clientpreh, clientprec = self.model_1(features = [seq0[:,:int(self.window_size/2),:], seq1[:,:int(self.window_size/2),:]], device = self.device)
+                    output = self.model_2(features=[seq0[:,int(self.window_size/2):,:], seq1[:,int(self.window_size/2):,:]]
+                                     , hPrevious = clientpreh, cPrevious = clientprec, device=self.device)
+                    
+                    predicted = torch.argsort(output, 1)[0][-self.num_candidates:]
                     if label not in predicted:
                         TP += self.test_abnormal_loader[line]
                         break

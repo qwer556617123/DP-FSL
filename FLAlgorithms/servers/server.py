@@ -2,8 +2,9 @@ import sys
 import torch
 import copy
 import os
+import datetime
 
-from utils.utils import fetch_log_datasets
+from utils.utils import fetch_log_datasets, clip_generator, add_noise_generator
 from FLAlgorithms.clients.client import Client
 
 class Server():
@@ -24,12 +25,19 @@ class Server():
 
         self.client_weights = [1/self.client_num for i in range(self.client_num)]
         
+        # Differential Privacy
+        self.dp = args.dp
+        self.group = {'noise_scale':args.noise_scale, 'norm_bound':args.norm_bound}
+
         self.v = {}
         self.grad = {}
         for key in self.global_model.state_dict().keys():
             self.v[key] = torch.add(torch.zeros_like(self.global_model.state_dict()[key],dtype=torch.float32),self.tau**2)
             self.grad[key] = torch.zeros_like(self.global_model.state_dict()[key],dtype=torch.float32)
 
+        print("FL Server")
+        print("Model: {}".format(self.model_name))
+        print("Mode: {}".format(self.mode))
         print("Total clients: {}".format(self.client_num))
 
         for i in range(self.client_num):
@@ -61,7 +69,13 @@ class Server():
                     temp = torch.zeros_like(self.global_model.state_dict()[key])
                     for client_idx in range(len(self.client_weights)):
                         temp += self.client_weights[client_idx] * self.clients[client_idx].model.state_dict()[key]                         
-                    param.grad = temp - param.data              
+                    param.grad = temp - param.data 
+
+                    if self.dp:
+                        clip = clip_generator(norm_bound=self.group['norm_bound'])
+                        add_noise = add_noise_generator(noise_scale=self.group['noise_scale'] * self.group['norm_bound']) 
+                        param.grad = add_noise(clip(param.grad))
+
                     param.grad = torch.mul(grad[key], self.beta_1) + torch.mul(param.grad, 1-self.beta_1) 
                     grad[key] = param.grad                
                     v[key] = torch.mul(v[key], self.beta_2) + torch.mul(param.grad**2, 1-self.beta_2)
@@ -79,7 +93,11 @@ class Server():
                     else:
                         temp = torch.zeros_like(self.global_model.state_dict()[key]).to(self.device)
                         for client_idx in range(self.client_num):
-                            temp += self.client_weights[client_idx] * self.clients[client_idx].model.state_dict()[key]                        
+                            temp += self.client_weights[client_idx] * self.clients[client_idx].model.state_dict()[key]    
+                        if self.dp:
+                            clip = clip_generator(norm_bound=self.group['norm_bound'])
+                            add_noise = add_noise_generator(noise_scale=self.group['noise_scale'] * self.group['norm_bound'])
+                            temp = add_noise(clip(temp))                    
                         self.global_model.state_dict()[key].data.copy_(temp)
                         for client_idx in range(self.client_num):
                             self.clients[client_idx].model.state_dict()[key].data.copy_(self.global_model.state_dict()[key])
@@ -87,12 +105,17 @@ class Server():
     
     def save_model(self):
         print("saving model")
-        model_path = os.path.join("./models/", self.model_name)
+        date = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+        model_path = os.path.join("./models/", self.model_name + "/FL/" + date)
         if not os.path.exists(model_path):
             os.makedirs(model_path)
-        torch.save(self.global_model.state_dict(), os.path.join(model_path, self.model_name + '_' + self.mode + ".pt"))
+        torch.save(self.global_model.state_dict(), os.path.join(model_path, 
+                                                                str(self.client_num) + '_Client_' + self.model_name + '_SL_' + self.mode + '_dp' + ".pt" if self.dp 
+                                                                else str(self.client_num) + '_Client_' + self.model_name + '_SL_' + self.mode + ".pt"))
+        print("Model saved to path: {}".format(model_path))
 
     def test(self):
         print("\n\n------------- Test -------------\n\n")
-        for client in self.clients: 
+        for idx, client in enumerate(self.clients):
+            print('Client ', idx) 
             client.test()
